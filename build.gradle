@@ -1,0 +1,44 @@
+plugins {
+    id 'java'
+    id 'org.jetbrains.intellij.platform' version '2.2.0'
+}
+
+group 'com.stellaris.modmanager'
+version '1.0.0'
+
+repositories {
+    mavenCentral()
+    intellijPlatform {
+        defaultRepositories()
+    }
+}
+
+dependencies {
+    intellijPlatform {
+        intellijIdeaCommunity('2025.1')
+        instrumentationTools()
+    }
+}
+
+intellijPlatform {
+    buildSearchableOptions {
+        enabled = false
+    }
+    pluginConfiguration {
+        name = 'Stellaris mod path annotation'
+        version = project.version
+        ideaVersion {
+            sinceBuild = '251'
+            untilBuild = '253.*'
+        }
+    }
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
+}
+
+tasks.withType(JavaCompile) {
+    options.encoding = 'UTF-8'
+}

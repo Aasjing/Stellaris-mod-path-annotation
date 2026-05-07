@@ -1,0 +1,25 @@
+<idea-plugin>
+    <id>com.stellaris.modmanager</id>
+    <name>Stellaris mod path annotation</name>
+    <vendor email="support@example.com" url="https://example.com">Stellaris mod path annotation</vendor>
+
+    <description><![CDATA[
+    A tool window plugin for managing and browsing Stellaris mods from Steam Workshop.
+    
+    Features:
+    - Automatically detects Steam Workshop directory
+    - Reads descriptor.mod files to extract mod information
+    - Displays mod information with color coding
+    - Click to open mod projects in IDE
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow id="StellarisModPathAnnotation"
+                    secondary="false" 
+                    anchor="right"
+                    factoryClass="com.stellaris.modmanager.ModManagerToolWindowFactory"
+                    icon="/icons/mod_icon.svg"/>
+    </extensions>
+</idea-plugin>
