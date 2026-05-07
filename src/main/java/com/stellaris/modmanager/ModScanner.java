@@ -152,6 +152,8 @@ public class ModScanner {
             }
 
             String thumbnailPath = findThumbnail(modFolder);
+            long folderSize = calculateFolderSize(modFolder);
+            long lastModified = getLastModified(modFolder);
 
             return new ModInfo(
                     folderName,
@@ -159,7 +161,9 @@ public class ModScanner {
                     version != null ? version : "N/A",
                     supportedVersion != null ? supportedVersion : "N/A",
                     modFolder.toString(),
-                    thumbnailPath
+                    thumbnailPath,
+                    folderSize,
+                    lastModified
             );
         } catch (IOException e) {
             LOG.warn("Failed to parse descriptor file: " + descriptorFile, e);
@@ -175,6 +179,31 @@ public class ModScanner {
             }
         }
         return null;
+    }
+
+    private static long calculateFolderSize(Path folder) {
+        try (Stream<Path> stream = Files.walk(folder)) {
+            return stream
+                    .filter(Files::isRegularFile)
+                    .mapToLong(p -> {
+                        try {
+                            return Files.size(p);
+                        } catch (IOException e) {
+                            return 0;
+                        }
+                    })
+                    .sum();
+        } catch (IOException e) {
+            return 0;
+        }
+    }
+
+    private static long getLastModified(Path folder) {
+        try {
+            return Files.getLastModifiedTime(folder).toMillis();
+        } catch (IOException e) {
+            return 0;
+        }
     }
 
     private static String extractValue(String content, String key) {

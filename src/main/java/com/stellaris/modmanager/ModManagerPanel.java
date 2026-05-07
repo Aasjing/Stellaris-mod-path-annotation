@@ -18,7 +18,7 @@ public class ModManagerPanel extends JPanel {
     private JLabel statusLabel;
     private SwingWorker<List<ModInfo>, Void> currentWorker;
     private List<ModInfo> cachedMods;
-    private boolean gridView = false;
+    private boolean gridView = true;
 
     public ModManagerPanel(Project project) {
         this.project = project;
@@ -38,6 +38,33 @@ public class ModManagerPanel extends JPanel {
         }
     }
 
+    public void sortByName() {
+        if (cachedMods == null || cachedMods.isEmpty()) {
+            return;
+        }
+        cachedMods.sort((a, b) -> String.CASE_INSENSITIVE_ORDER.compare(a.modName(), b.modName()));
+        rebuildModList(cachedMods);
+        statusLabel.setText("找到 " + cachedMods.size() + " 个模组 (按名称排序)");
+    }
+
+    public void sortBySize() {
+        if (cachedMods == null || cachedMods.isEmpty()) {
+            return;
+        }
+        cachedMods.sort((a, b) -> Long.compare(b.folderSize(), a.folderSize()));
+        rebuildModList(cachedMods);
+        statusLabel.setText("找到 " + cachedMods.size() + " 个模组 (按大小排序)");
+    }
+
+    public void sortByTime() {
+        if (cachedMods == null || cachedMods.isEmpty()) {
+            return;
+        }
+        cachedMods.sort((a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+        rebuildModList(cachedMods);
+        statusLabel.setText("找到 " + cachedMods.size() + " 个模组 (按时间排序)");
+    }
+
     private void cancelCurrentWorker() {
         if (currentWorker != null && !currentWorker.isDone()) {
             currentWorker.cancel(true);
@@ -47,6 +74,7 @@ public class ModManagerPanel extends JPanel {
     private void initializePanel() {
         setLayout(new BorderLayout());
         setBackground(new Color(43, 43, 43));
+        setPreferredSize(new Dimension(520, 400));
 
         JScrollPane scrollPane = createScrollPane();
         add(scrollPane, BorderLayout.CENTER);
@@ -114,9 +142,6 @@ public class ModManagerPanel extends JPanel {
                     LOG.warn("Failed to load mods", e);
                     showError("加载模组失败: " + e.getMessage());
                 }
-
-                modListContainer.revalidate();
-                modListContainer.repaint();
             }
         };
 
@@ -128,27 +153,113 @@ public class ModManagerPanel extends JPanel {
 
         if (gridView) {
             modListContainer.setLayout(new WrapLayout(FlowLayout.LEFT, 8, 8));
-            for (ModInfo mod : mods) {
-                ModCardPanel card = new ModCardPanel(mod, () -> openModProject(mod));
+            for (int i = 0; i < mods.size(); i++) {
+                ModInfo mod = mods.get(i);
+                int index = i;
+                ModCardPanel card = new ModCardPanel(mod,
+                        () -> openModProject(mod),
+                        (sourceIdx, targetPanel) -> {
+                            int targetIdx = findPanelIndex(targetPanel);
+                            if (targetIdx >= 0) {
+                                moveMod(sourceIdx, targetIdx);
+                            }
+                        }
+                );
                 modListContainer.add(card);
             }
             statusLabel.setText("找到 " + mods.size() + " 个模组 (图标视图)");
         } else {
             modListContainer.setLayout(new BoxLayout(modListContainer, BoxLayout.Y_AXIS));
-            for (ModInfo mod : mods) {
-                ModListPanel modPanel = new ModListPanel(mod, () -> openModProject(mod));
+            for (int i = 0; i < mods.size(); i++) {
+                ModInfo mod = mods.get(i);
+                int index = i;
+                ModListPanel modPanel = new ModListPanel(mod,
+                        () -> openModProject(mod),
+                        () -> moveMod(index, index - 1),
+                        () -> moveMod(index, index + 1),
+                        (sourceIdx, targetPanel) -> {
+                            int targetIdx = findPanelIndex(targetPanel);
+                            if (targetIdx >= 0) {
+                                moveMod(sourceIdx, targetIdx);
+                            }
+                        }
+                );
                 modListContainer.add(modPanel);
-
-                JSeparator separator = new JSeparator();
-                separator.setMaximumSize(new Dimension(Integer.MAX_VALUE, 1));
-                separator.setBackground(new Color(60, 63, 65));
-                modListContainer.add(separator);
             }
             statusLabel.setText("找到 " + mods.size() + " 个模组");
         }
 
         modListContainer.revalidate();
         modListContainer.repaint();
+    }
+
+    private int findPanelIndex(Component target) {
+        for (int i = 0; i < modListContainer.getComponentCount(); i++) {
+            if (modListContainer.getComponent(i) == target) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private void moveMod(int fromIndex, int toIndex) {
+        if (fromIndex < 0 || toIndex < 0) {
+            return;
+        }
+        int count = modListContainer.getComponentCount();
+        if (fromIndex >= count || toIndex >= count) {
+            return;
+        }
+        if (fromIndex == toIndex) {
+            return;
+        }
+
+        Component comp = modListContainer.getComponent(fromIndex);
+        modListContainer.remove(fromIndex);
+        modListContainer.add(comp, toIndex);
+
+        ModInfo moved = cachedMods.remove(fromIndex);
+        cachedMods.add(toIndex, moved);
+
+        refreshAllPanelCallbacks();
+        modListContainer.revalidate();
+        modListContainer.repaint();
+
+        if (comp instanceof JComponent jc) {
+            jc.scrollRectToVisible(jc.getBounds());
+        }
+    }
+
+    private void refreshAllPanelCallbacks() {
+        for (int i = 0; i < modListContainer.getComponentCount(); i++) {
+            Component comp = modListContainer.getComponent(i);
+            if (comp instanceof ModListPanel panel) {
+                ModInfo mod = cachedMods.get(i);
+                int index = i;
+                panel.updateCallbacks(
+                        () -> openModProject(mod),
+                        () -> moveMod(index, index - 1),
+                        () -> moveMod(index, index + 1),
+                        (sourceIdx, targetPanel) -> {
+                            int targetIdx = findPanelIndex(targetPanel);
+                            if (targetIdx >= 0) {
+                                moveMod(sourceIdx, targetIdx);
+                            }
+                        }
+                );
+            } else if (comp instanceof ModCardPanel card) {
+                ModInfo mod = cachedMods.get(i);
+                card.updateCallbacks(
+                        () -> openModProject(mod),
+                        (sourceIdx, targetPanel) -> {
+                            int targetIdx = findPanelIndex(targetPanel);
+                            if (targetIdx >= 0) {
+                                moveMod(sourceIdx, targetIdx);
+                            }
+                        }
+                );
+            }
+        }
     }
 
     private void showNoModsFound() {

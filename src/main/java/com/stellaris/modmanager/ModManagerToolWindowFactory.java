@@ -15,7 +15,9 @@ public class ModManagerToolWindowFactory implements ToolWindowFactory {
         ModManagerPanel panel = new ModManagerPanel(project);
 
         toolWindow.setTitle("Stellaris mod 路径标注：");
-        toolWindow.setTitleActions(List.of(new RefreshAction(panel), new ToggleViewAction(panel)));
+        toolWindow.setTitleActions(List.of(new RefreshAction(panel), new ToggleViewAction(panel), new SortAction(panel)));
+        toolWindow.setAutoHide(false);
+        toolWindow.activate(null);
 
         @SuppressWarnings("deprecation")
         ContentFactory contentFactory = ContentFactory.getInstance();

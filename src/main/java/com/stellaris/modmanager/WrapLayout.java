@@ -2,6 +2,10 @@ package com.stellaris.modmanager;
 
 import java.awt.*;
 
+import javax.swing.JScrollBar;
+import javax.swing.JScrollPane;
+import javax.swing.JViewport;
+
 public class WrapLayout extends FlowLayout {
 
     public WrapLayout() {
@@ -90,11 +94,11 @@ public class WrapLayout extends FlowLayout {
 
     private Insets getScrollBarInsets(Container target) {
         Container parent = target.getParent();
-        if (parent instanceof javax.swing.JViewport) {
+        if (parent instanceof JViewport) {
             Container grandParent = parent.getParent();
-            if (grandParent instanceof javax.swing.JScrollPane) {
-                javax.swing.JScrollPane scrollPane = (javax.swing.JScrollPane) grandParent;
-                javax.swing.JScrollBar vsb = scrollPane.getVerticalScrollBar();
+            if (grandParent instanceof JScrollPane) {
+                JScrollPane scrollPane = (JScrollPane) grandParent;
+                JScrollBar vsb = scrollPane.getVerticalScrollBar();
                 if (vsb != null && vsb.isVisible()) {
                     return new Insets(0, 0, 0, vsb.getWidth());
                 }

@@ -9,7 +9,7 @@ import org.jetbrains.annotations.NotNull;
 public class ToggleViewAction extends AnAction implements Toggleable {
 
     private final ModManagerPanel panel;
-    private boolean gridMode = false;
+    private boolean gridMode = true;
 
     public ToggleViewAction(ModManagerPanel panel) {
         super("切换视图", "切换列表/图标视图", AllIcons.Actions.GroupBy);
