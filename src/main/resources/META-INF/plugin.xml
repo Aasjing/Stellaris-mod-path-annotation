@@ -1,7 +1,9 @@
 <idea-plugin>
     <id>com.stellaris.modmanager</id>
     <name>Stellaris mod path annotation</name>
-    <vendor email="support@example.com" url="https://example.com">Stellaris mod path annotation</vendor>
+    <vendor email="support@example.com" url="https://github.com">Stellaris mod path annotation</vendor>
+
+    <idea-version since-build="251" until-build="253.*"/>
 
     <description><![CDATA[
     A tool window plugin for managing and browsing Stellaris mods from Steam Workshop.

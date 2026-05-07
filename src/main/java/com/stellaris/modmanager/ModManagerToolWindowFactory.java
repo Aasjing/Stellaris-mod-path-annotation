@@ -9,7 +9,7 @@ import com.intellij.ui.content.ContentFactory;
 import java.util.List;
 
 public class ModManagerToolWindowFactory implements ToolWindowFactory {
-    
+
     @Override
     public void createToolWindowContent(Project project, ToolWindow toolWindow) {
         ModManagerPanel panel = new ModManagerPanel(project);
@@ -17,6 +17,7 @@ public class ModManagerToolWindowFactory implements ToolWindowFactory {
         toolWindow.setTitle("Stellaris mod 路径标注：");
         toolWindow.setTitleActions(List.of(new RefreshAction(panel)));
 
+        @SuppressWarnings("deprecation")
         ContentFactory contentFactory = ContentFactory.getInstance();
         Content content = contentFactory.createContent(panel, "", false);
         toolWindow.getContentManager().addContent(content);
