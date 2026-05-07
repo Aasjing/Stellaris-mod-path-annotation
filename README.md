@@ -4,17 +4,19 @@
 
 ## 功能特性
 
-- ✅ 自动检测 Steam Workshop 目录（支持 Windows / macOS / Linux）
-- ✅ Windows 下自动解析 `libraryfolders.vdf`，支持多 Steam 库路径
-- ✅ 读取 `descriptor.mod` 文件提取模组信息
-- ✅ 颜色编码显示模组信息
+- 自动检测 Steam Workshop 目录（支持 Windows / macOS / Linux）
+- Windows 下自动解析 `libraryfolders.vdf`，支持多 Steam 库路径
+- 读取 `descriptor.mod` 文件提取模组信息（名称、版本、支持版本）
+- 颜色编码显示模组信息
   - 文件夹名：白色
   - 模组名称：棕色
   - 版本号：灰白色
   - 支持版本：绿色
-- ✅ 点击模组直接在 IDE 中打开项目
-- ✅ 异步加载，不阻塞 UI
-- ✅ 一键刷新模组列表
+- 点击模组直接在 IDE 中打开项目
+- 异步加载，不阻塞 UI
+- 一键刷新模组列表
+- 自动检测缩略图（`thumbnail.png` / `thumb.png` / `preview.png` 等），鼠标悬浮时左侧弹出预览
+- 列表 / 图标双视图切换（工具栏切换按钮），图标视图自动自适应行列
 
 ## 构建方法
 
@@ -35,7 +37,9 @@
 
 1. 打开右侧工具栏中的 "Stellaris mod 路径标注："
 2. 插件会自动扫描 Steam Workshop 目录
-3. 点击任意模组可在 IDE 中打开该项目
+3. 鼠标悬浮在列表项上可预览缩略图
+4. 点击工具栏切换按钮可在列表视图和图标视图间切换
+5. 点击任意模组可在 IDE 中打开该项目
 
 ## 系统要求
 

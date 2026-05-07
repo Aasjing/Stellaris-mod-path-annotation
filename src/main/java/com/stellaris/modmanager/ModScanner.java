@@ -31,6 +31,12 @@ public class ModScanner {
             System.getProperty("user.home") + "/.var/app/com.valvesoftware.Steam/.local/share/Steam"
     );
 
+    private static final List<String> THUMBNAIL_NAMES = Arrays.asList(
+            "thumbnail.png", "thumbnail.jpg", "thumbnail.jpeg",
+            "thumb.png", "thumb.jpg", "thumb.jpeg",
+            "preview.png", "preview.jpg"
+    );
+
     private static final Pattern QUOTED_VALUE_PATTERN = Pattern.compile("(\\w+)\\s*=\\s*\"([^\"]*)\"");
     private static final Pattern SINGLE_QUOTED_VALUE_PATTERN = Pattern.compile("(\\w+)\\s*=\\s*'([^']*)'");
 
@@ -145,17 +151,30 @@ public class ModScanner {
                 modName = folderName;
             }
 
+            String thumbnailPath = findThumbnail(modFolder);
+
             return new ModInfo(
                     folderName,
                     modName,
                     version != null ? version : "N/A",
                     supportedVersion != null ? supportedVersion : "N/A",
-                    modFolder.toString()
+                    modFolder.toString(),
+                    thumbnailPath
             );
         } catch (IOException e) {
             LOG.warn("Failed to parse descriptor file: " + descriptorFile, e);
             return null;
         }
+    }
+
+    private static String findThumbnail(Path modFolder) {
+        for (String name : THUMBNAIL_NAMES) {
+            Path thumbnailFile = modFolder.resolve(name);
+            if (Files.isRegularFile(thumbnailFile)) {
+                return thumbnailFile.toString();
+            }
+        }
+        return null;
     }
 
     private static String extractValue(String content, String key) {

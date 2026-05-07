@@ -5,16 +5,31 @@ import javax.swing.border.EmptyBorder;
 import java.awt.*;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import javax.imageio.ImageIO;
 
 public class ModListPanel extends JPanel {
 
     private final Runnable onModClick;
     private final ModInfo currentMod;
+    private BufferedImage thumbnailImage;
+    private JWindow hoverWindow;
 
     public ModListPanel(ModInfo modInfo, Runnable onModClick) {
         this.currentMod = modInfo;
         this.onModClick = onModClick;
+        loadThumbnail();
         initializePanel();
+    }
+
+    private void loadThumbnail() {
+        if (currentMod.thumbnailPath() != null) {
+            try {
+                thumbnailImage = ImageIO.read(new File(currentMod.thumbnailPath()));
+            } catch (Exception ignored) {
+            }
+        }
     }
 
     private void initializePanel() {
@@ -40,14 +55,67 @@ public class ModListPanel extends JPanel {
             public void mouseEntered(MouseEvent e) {
                 setBackground(new Color(50, 50, 50));
                 repaint();
+                showThumbnailPopup();
             }
 
             @Override
             public void mouseExited(MouseEvent e) {
                 setBackground(new Color(43, 43, 43));
                 repaint();
+                hideThumbnailPopup();
             }
         });
+    }
+
+    private void showThumbnailPopup() {
+        if (thumbnailImage == null) {
+            return;
+        }
+        hideThumbnailPopup();
+
+        hoverWindow = new JWindow(SwingUtilities.getWindowAncestor(this));
+        hoverWindow.setBackground(new Color(0, 0, 0, 0));
+
+        int maxWidth = 320;
+        int imgW = thumbnailImage.getWidth();
+        int imgH = thumbnailImage.getHeight();
+        if (imgW > maxWidth) {
+            double ratio = (double) maxWidth / imgW;
+            imgW = maxWidth;
+            imgH = (int) (imgH * ratio);
+        }
+
+        int finalW = imgW;
+        int finalH = imgH;
+        JPanel content = new JPanel(new BorderLayout()) {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+                int x = (getWidth() - finalW) / 2;
+                int y = (getHeight() - finalH) / 2;
+                g2.drawImage(thumbnailImage, x, y, finalW, finalH, this);
+                g2.dispose();
+            }
+        };
+        content.setPreferredSize(new Dimension(imgW + 12, imgH + 12));
+        content.setBackground(new Color(43, 43, 43));
+        content.setBorder(BorderFactory.createLineBorder(new Color(80, 80, 80), 1));
+
+        hoverWindow.setContentPane(content);
+        hoverWindow.pack();
+
+        Point loc = getLocationOnScreen();
+        hoverWindow.setLocation(loc.x - hoverWindow.getWidth() - 10, loc.y);
+        hoverWindow.setVisible(true);
+    }
+
+    private void hideThumbnailPopup() {
+        if (hoverWindow != null) {
+            hoverWindow.dispose();
+            hoverWindow = null;
+        }
     }
 
     private JLabel createModLabel() {

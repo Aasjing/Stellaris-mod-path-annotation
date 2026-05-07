@@ -17,6 +17,8 @@ public class ModManagerPanel extends JPanel {
     private JPanel modListContainer;
     private JLabel statusLabel;
     private SwingWorker<List<ModInfo>, Void> currentWorker;
+    private List<ModInfo> cachedMods;
+    private boolean gridView = false;
 
     public ModManagerPanel(Project project) {
         this.project = project;
@@ -27,6 +29,13 @@ public class ModManagerPanel extends JPanel {
     public void refreshMods() {
         cancelCurrentWorker();
         loadMods();
+    }
+
+    public void setGridView(boolean grid) {
+        this.gridView = grid;
+        if (cachedMods != null) {
+            rebuildModList(cachedMods);
+        }
     }
 
     private void cancelCurrentWorker() {
@@ -56,6 +65,7 @@ public class ModManagerPanel extends JPanel {
         JScrollPane scrollPane = new JScrollPane(modListContainer);
         scrollPane.setBorder(null);
         scrollPane.getVerticalScrollBar().setUnitIncrement(16);
+        scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
 
         return scrollPane;
     }
@@ -97,17 +107,8 @@ public class ModManagerPanel extends JPanel {
                         return;
                     }
 
-                    for (ModInfo mod : mods) {
-                        ModListPanel modPanel = new ModListPanel(mod, () -> openModProject(mod));
-                        modListContainer.add(modPanel);
-
-                        JSeparator separator = new JSeparator();
-                        separator.setMaximumSize(new Dimension(Integer.MAX_VALUE, 1));
-                        separator.setBackground(new Color(60, 63, 65));
-                        modListContainer.add(separator);
-                    }
-
-                    statusLabel.setText("找到 " + mods.size() + " 个模组");
+                    cachedMods = mods;
+                    rebuildModList(mods);
 
                 } catch (Exception e) {
                     LOG.warn("Failed to load mods", e);
@@ -120,6 +121,34 @@ public class ModManagerPanel extends JPanel {
         };
 
         currentWorker.execute();
+    }
+
+    private void rebuildModList(List<ModInfo> mods) {
+        modListContainer.removeAll();
+
+        if (gridView) {
+            modListContainer.setLayout(new WrapLayout(FlowLayout.LEFT, 8, 8));
+            for (ModInfo mod : mods) {
+                ModCardPanel card = new ModCardPanel(mod, () -> openModProject(mod));
+                modListContainer.add(card);
+            }
+            statusLabel.setText("找到 " + mods.size() + " 个模组 (图标视图)");
+        } else {
+            modListContainer.setLayout(new BoxLayout(modListContainer, BoxLayout.Y_AXIS));
+            for (ModInfo mod : mods) {
+                ModListPanel modPanel = new ModListPanel(mod, () -> openModProject(mod));
+                modListContainer.add(modPanel);
+
+                JSeparator separator = new JSeparator();
+                separator.setMaximumSize(new Dimension(Integer.MAX_VALUE, 1));
+                separator.setBackground(new Color(60, 63, 65));
+                modListContainer.add(separator);
+            }
+            statusLabel.setText("找到 " + mods.size() + " 个模组");
+        }
+
+        modListContainer.revalidate();
+        modListContainer.repaint();
     }
 
     private void showNoModsFound() {
