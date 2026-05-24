@@ -5,6 +5,7 @@ import com.intellij.openapi.diagnostic.Logger;
 import java.io.*;
 import java.nio.file.*;
 import java.util.*;
+import java.util.concurrent.*;
 import java.util.regex.*;
 import java.util.stream.*;
 
@@ -114,6 +115,11 @@ public class ModScanner {
     }
 
     public static List<ModInfo> scanMods(String workshopPath) {
+        return scanMods(workshopPath, new ConcurrentHashMap<>());
+    }
+
+    public static List<ModInfo> scanMods(String workshopPath,
+                                          ConcurrentHashMap<String, ModCacheManager.CacheEntry> cache) {
         List<ModInfo> mods = new ArrayList<>();
 
         try (Stream<Path> paths = Files.list(Paths.get(workshopPath))) {
@@ -124,7 +130,7 @@ public class ModScanner {
             for (Path modFolder : modFolders) {
                 Path descriptorFile = modFolder.resolve("descriptor.mod");
                 if (Files.exists(descriptorFile)) {
-                    ModInfo modInfo = parseDescriptorFile(modFolder, descriptorFile);
+                    ModInfo modInfo = parseDescriptorFile(modFolder, descriptorFile, cache);
                     if (modInfo != null) {
                         mods.add(modInfo);
                     }
@@ -137,13 +143,16 @@ public class ModScanner {
         return mods;
     }
 
-    private static ModInfo parseDescriptorFile(Path modFolder, Path descriptorFile) {
+    private static ModInfo parseDescriptorFile(Path modFolder, Path descriptorFile,
+                                                ConcurrentHashMap<String, ModCacheManager.CacheEntry> cache) {
         try {
             String content = Files.readString(descriptorFile);
 
-            String modName = extractValue(content, "name");
-            String version = extractValue(content, "version");
-            String supportedVersion = extractValue(content, "supported_version");
+            Map<String, String> values = parseAllValues(content);
+
+            String modName = values.get("name");
+            String version = values.get("version");
+            String supportedVersion = values.get("supported_version");
 
             String folderName = modFolder.getFileName().toString();
 
@@ -151,15 +160,35 @@ public class ModScanner {
                 modName = folderName;
             }
 
-            String thumbnailPath = findThumbnail(modFolder);
-            long folderSize = calculateFolderSize(modFolder);
             long lastModified = getLastModified(modFolder);
+            ModCacheManager.CacheEntry cached = cache.get(folderName);
+
+            String thumbnailPath;
+            long folderSize;
+
+            if (cached != null && cached.isUpToDate(modFolder)) {
+                thumbnailPath = cached.thumbnailPath;
+                folderSize = cached.folderSize;
+                if (thumbnailPath != null && !Files.isRegularFile(Paths.get(thumbnailPath))) {
+                    thumbnailPath = findThumbnail(modFolder);
+                }
+            } else {
+                thumbnailPath = findThumbnail(modFolder);
+                folderSize = calculateFolderSize(modFolder);
+            }
+
+            if (version == null) {
+                version = "N/A";
+            }
+            if (supportedVersion == null) {
+                supportedVersion = "N/A";
+            }
 
             return new ModInfo(
                     folderName,
                     modName,
-                    version != null ? version : "N/A",
-                    supportedVersion != null ? supportedVersion : "N/A",
+                    version,
+                    supportedVersion,
                     modFolder.toString(),
                     thumbnailPath,
                     folderSize,
@@ -206,21 +235,18 @@ public class ModScanner {
         }
     }
 
-    private static String extractValue(String content, String key) {
+    private static Map<String, String> parseAllValues(String content) {
+        Map<String, String> values = new HashMap<>();
         Matcher matcher = QUOTED_VALUE_PATTERN.matcher(content);
         while (matcher.find()) {
-            if (key.equals(matcher.group(1))) {
-                return matcher.group(2);
-            }
+            values.putIfAbsent(matcher.group(1), matcher.group(2));
         }
 
         matcher = SINGLE_QUOTED_VALUE_PATTERN.matcher(content);
         while (matcher.find()) {
-            if (key.equals(matcher.group(1))) {
-                return matcher.group(2);
-            }
+            values.putIfAbsent(matcher.group(1), matcher.group(2));
         }
 
-        return null;
+        return values;
     }
 }

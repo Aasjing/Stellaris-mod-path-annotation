@@ -10,9 +10,7 @@ import java.awt.datatransfer.Transferable;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
-import java.io.File;
 import java.util.function.BiConsumer;
-import javax.imageio.ImageIO;
 
 public class ModCardPanel extends JPanel {
 
@@ -43,16 +41,18 @@ public class ModCardPanel extends JPanel {
     private final ModInfo currentMod;
     private BiConsumer<Integer, ModCardPanel> onDragDrop;
     private BufferedImage thumbnailImage;
+    private JPanel thumbnailPanelRef;
     private JWindow hoverWindow;
     private Point dragStart;
+    private javax.swing.Timer previewTimer;
 
     public ModCardPanel(ModInfo modInfo, Runnable onModClick,
                         BiConsumer<Integer, ModCardPanel> onDragDrop) {
         this.currentMod = modInfo;
         this.onModClick = onModClick;
         this.onDragDrop = onDragDrop;
-        loadThumbnail();
         initializePanel();
+        loadThumbnailAsync();
     }
 
     public void updateCallbacks(Runnable onModClick,
@@ -61,12 +61,19 @@ public class ModCardPanel extends JPanel {
         this.onDragDrop = onDragDrop;
     }
 
-    private void loadThumbnail() {
+    private void loadThumbnailAsync() {
         if (currentMod.thumbnailPath() != null) {
-            try {
-                thumbnailImage = ImageIO.read(new File(currentMod.thumbnailPath()));
-            } catch (Exception ignored) {
-            }
+            ThumbnailCache.loadAsync(
+                    currentMod.thumbnailPath(),
+                    currentMod.folderName(),
+                    THUMB_SIZE,
+                    image -> {
+                        thumbnailImage = image;
+                        if (thumbnailPanelRef != null) {
+                            thumbnailPanelRef.repaint();
+                        }
+                    }
+            );
         }
     }
 
@@ -126,7 +133,14 @@ public class ModCardPanel extends JPanel {
     @Override
     public void removeNotify() {
         super.removeNotify();
-        hideLargePreview();
+        if (previewTimer != null) {
+            previewTimer.stop();
+            previewTimer = null;
+        }
+        if (hoverWindow != null) {
+            hoverWindow.dispose();
+            hoverWindow = null;
+        }
     }
 
     private JPanel createThumbnailPanel() {
@@ -201,6 +215,8 @@ public class ModCardPanel extends JPanel {
             }
         });
 
+        thumbnailPanelRef = panel;
+
         return panel;
     }
 
@@ -230,10 +246,23 @@ public class ModCardPanel extends JPanel {
         if (thumbnailImage == null) {
             return;
         }
-        hideLargePreview();
+        if (previewTimer != null) {
+            previewTimer.stop();
+        }
+        previewTimer = new javax.swing.Timer(150, e -> {
+            if (hoverWindow != null && hoverWindow.isVisible()) {
+                return;
+            }
+            doShowLargePreview();
+        });
+        previewTimer.setRepeats(false);
+        previewTimer.start();
+    }
 
-        hoverWindow = new JWindow(SwingUtilities.getWindowAncestor(this));
-        hoverWindow.setBackground(new Color(0, 0, 0, 0));
+    private void doShowLargePreview() {
+        if (thumbnailImage == null) {
+            return;
+        }
 
         int maxWidth = 400;
         int imgW = thumbnailImage.getWidth();
@@ -262,6 +291,10 @@ public class ModCardPanel extends JPanel {
         content.setBackground(new Color(43, 43, 43));
         content.setBorder(BorderFactory.createLineBorder(new Color(80, 80, 80), 1));
 
+        if (hoverWindow == null || !hoverWindow.isDisplayable()) {
+            hoverWindow = new JWindow(SwingUtilities.getWindowAncestor(this));
+            hoverWindow.setBackground(new Color(0, 0, 0, 0));
+        }
         hoverWindow.setContentPane(content);
         hoverWindow.pack();
 
@@ -271,9 +304,12 @@ public class ModCardPanel extends JPanel {
     }
 
     private void hideLargePreview() {
+        if (previewTimer != null) {
+            previewTimer.stop();
+            previewTimer = null;
+        }
         if (hoverWindow != null) {
-            hoverWindow.dispose();
-            hoverWindow = null;
+            hoverWindow.setVisible(false);
         }
     }
 

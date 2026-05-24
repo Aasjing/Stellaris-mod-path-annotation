@@ -10,9 +10,7 @@ import java.awt.datatransfer.Transferable;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
-import java.io.File;
 import java.util.function.BiConsumer;
-import javax.imageio.ImageIO;
 
 public class ModListPanel extends JPanel {
 
@@ -43,6 +41,7 @@ public class ModListPanel extends JPanel {
     private BufferedImage thumbnailImage;
     private JWindow hoverWindow;
     private Point dragStart;
+    private javax.swing.Timer previewTimer;
 
     public ModListPanel(ModInfo modInfo, Runnable onModClick,
                         Runnable onMoveUp, Runnable onMoveDown,
@@ -52,8 +51,8 @@ public class ModListPanel extends JPanel {
         this.onMoveUp = onMoveUp;
         this.onMoveDown = onMoveDown;
         this.onDragDrop = onDragDrop;
-        loadThumbnail();
         initializePanel();
+        loadThumbnailAsync();
     }
 
     public void updateCallbacks(Runnable onModClick,
@@ -65,12 +64,16 @@ public class ModListPanel extends JPanel {
         this.onDragDrop = onDragDrop;
     }
 
-    private void loadThumbnail() {
+    private void loadThumbnailAsync() {
         if (currentMod.thumbnailPath() != null) {
-            try {
-                thumbnailImage = ImageIO.read(new File(currentMod.thumbnailPath()));
-            } catch (Exception ignored) {
-            }
+            ThumbnailCache.loadAsync(
+                    currentMod.thumbnailPath(),
+                    currentMod.folderName(),
+                    320,
+                    image -> {
+                        thumbnailImage = image;
+                    }
+            );
         }
     }
 
@@ -127,7 +130,14 @@ public class ModListPanel extends JPanel {
     @Override
     public void removeNotify() {
         super.removeNotify();
-        hideThumbnailPopup();
+        if (previewTimer != null) {
+            previewTimer.stop();
+            previewTimer = null;
+        }
+        if (hoverWindow != null) {
+            hoverWindow.dispose();
+            hoverWindow = null;
+        }
     }
 
     private JLabel createDragHandle() {
@@ -214,10 +224,23 @@ public class ModListPanel extends JPanel {
         if (thumbnailImage == null) {
             return;
         }
-        hideThumbnailPopup();
+        if (previewTimer != null) {
+            previewTimer.stop();
+        }
+        previewTimer = new javax.swing.Timer(150, e -> {
+            if (hoverWindow != null && hoverWindow.isVisible()) {
+                return;
+            }
+            doShowThumbnailPopup();
+        });
+        previewTimer.setRepeats(false);
+        previewTimer.start();
+    }
 
-        hoverWindow = new JWindow(SwingUtilities.getWindowAncestor(this));
-        hoverWindow.setBackground(new Color(0, 0, 0, 0));
+    private void doShowThumbnailPopup() {
+        if (thumbnailImage == null) {
+            return;
+        }
 
         int maxWidth = 320;
         int imgW = thumbnailImage.getWidth();
@@ -246,6 +269,10 @@ public class ModListPanel extends JPanel {
         content.setBackground(new Color(43, 43, 43));
         content.setBorder(BorderFactory.createLineBorder(new Color(80, 80, 80), 1));
 
+        if (hoverWindow == null || !hoverWindow.isDisplayable()) {
+            hoverWindow = new JWindow(SwingUtilities.getWindowAncestor(this));
+            hoverWindow.setBackground(new Color(0, 0, 0, 0));
+        }
         hoverWindow.setContentPane(content);
         hoverWindow.pack();
 
@@ -255,9 +282,12 @@ public class ModListPanel extends JPanel {
     }
 
     private void hideThumbnailPopup() {
+        if (previewTimer != null) {
+            previewTimer.stop();
+            previewTimer = null;
+        }
         if (hoverWindow != null) {
-            hoverWindow.dispose();
-            hoverWindow = null;
+            hoverWindow.setVisible(false);
         }
     }
 

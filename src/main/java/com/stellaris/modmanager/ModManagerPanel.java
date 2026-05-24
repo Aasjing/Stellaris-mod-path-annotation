@@ -7,7 +7,10 @@ import com.intellij.openapi.project.Project;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.*;
+import java.util.stream.Collectors;
 
 public class ModManagerPanel extends JPanel {
 
@@ -111,12 +114,33 @@ public class ModManagerPanel extends JPanel {
                     return null;
                 }
 
-                List<ModInfo> allMods = new java.util.ArrayList<>();
+                ConcurrentHashMap<String, ModCacheManager.CacheEntry> cache =
+                        ModCacheManager.load();
+
+                if (workshopPaths.size() == 1) {
+                    return ModScanner.scanMods(workshopPaths.get(0), cache);
+                }
+
+                ExecutorService executor = Executors.newFixedThreadPool(
+                        Math.min(workshopPaths.size(), 4));
+                List<Future<List<ModInfo>>> futures = new ArrayList<>();
+
                 for (String path : workshopPaths) {
+                    futures.add(executor.submit(() ->
+                            ModScanner.scanMods(path, cache)));
+                }
+                executor.shutdown();
+
+                List<ModInfo> allMods = new ArrayList<>();
+                for (Future<List<ModInfo>> future : futures) {
                     if (isCancelled()) {
+                        executor.shutdownNow();
                         return null;
                     }
-                    allMods.addAll(ModScanner.scanMods(path));
+                    try {
+                        allMods.addAll(future.get());
+                    } catch (Exception ignored) {
+                    }
                 }
 
                 return allMods;
@@ -137,6 +161,14 @@ public class ModManagerPanel extends JPanel {
 
                     cachedMods = mods;
                     rebuildModList(mods);
+
+                    ConcurrentHashMap<String, ModCacheManager.CacheEntry> cache =
+                            new ConcurrentHashMap<>();
+                    for (ModInfo mod : mods) {
+                        cache.put(mod.folderName(),
+                                new ModCacheManager.CacheEntry(mod));
+                    }
+                    ModCacheManager.save(cache);
 
                 } catch (Exception e) {
                     LOG.warn("Failed to load mods", e);
