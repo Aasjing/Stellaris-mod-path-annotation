@@ -14,6 +14,8 @@ import java.util.function.BiConsumer;
 
 public class ModListPanel extends JPanel {
 
+    private static final int PREVIEW_SIZE = 320;
+
     private static final Color BG_COLOR = new Color(43, 43, 43);
     private static final Color BG_HOVER_COLOR = new Color(50, 50, 50);
     private static final Color BORDER_COLOR = new Color(60, 63, 65);
@@ -38,10 +40,8 @@ public class ModListPanel extends JPanel {
     private Runnable onMoveDown;
     private BiConsumer<Integer, ModListPanel> onDragDrop;
     private final ModInfo currentMod;
-    private BufferedImage thumbnailImage;
-    private JWindow hoverWindow;
     private Point dragStart;
-    private javax.swing.Timer previewTimer;
+    private String thumbnailSource;
 
     public ModListPanel(ModInfo modInfo, Runnable onModClick,
                         Runnable onMoveUp, Runnable onMoveDown,
@@ -51,8 +51,16 @@ public class ModListPanel extends JPanel {
         this.onMoveUp = onMoveUp;
         this.onMoveDown = onMoveDown;
         this.onDragDrop = onDragDrop;
+        this.thumbnailSource = modInfo.thumbnailPath();
         initializePanel();
-        loadThumbnailAsync();
+        resolveThumbnail();
+    }
+
+    private void resolveThumbnail() {
+        if (thumbnailSource != null) {
+            return;
+        }
+        WorkshopPreview.resolveAsync(currentMod.folderName(), path -> thumbnailSource = path);
     }
 
     public void updateCallbacks(Runnable onModClick,
@@ -62,19 +70,6 @@ public class ModListPanel extends JPanel {
         this.onMoveUp = onMoveUp;
         this.onMoveDown = onMoveDown;
         this.onDragDrop = onDragDrop;
-    }
-
-    private void loadThumbnailAsync() {
-        if (currentMod.thumbnailPath() != null) {
-            ThumbnailCache.loadAsync(
-                    currentMod.thumbnailPath(),
-                    currentMod.folderName(),
-                    320,
-                    image -> {
-                        thumbnailImage = image;
-                    }
-            );
-        }
     }
 
     private void initializePanel() {
@@ -101,14 +96,15 @@ public class ModListPanel extends JPanel {
             public void mouseEntered(MouseEvent e) {
                 setBackground(BG_HOVER_COLOR);
                 repaint();
-                showThumbnailPopup();
+                ThumbnailPreview.show(ModListPanel.this, thumbnailSource,
+                        currentMod.folderName(), PREVIEW_SIZE, null);
             }
 
             @Override
             public void mouseExited(MouseEvent e) {
                 setBackground(BG_COLOR);
                 repaint();
-                hideThumbnailPopup();
+                ThumbnailPreview.hide();
             }
         });
     }
@@ -124,19 +120,6 @@ public class ModListPanel extends JPanel {
             if (parent.getComponent(i) instanceof ModListPanel panel) {
                 panel.setDropHighlight(false);
             }
-        }
-    }
-
-    @Override
-    public void removeNotify() {
-        super.removeNotify();
-        if (previewTimer != null) {
-            previewTimer.stop();
-            previewTimer = null;
-        }
-        if (hoverWindow != null) {
-            hoverWindow.dispose();
-            hoverWindow = null;
         }
     }
 
@@ -157,6 +140,9 @@ public class ModListPanel extends JPanel {
 
             @Override
             public void mouseReleased(MouseEvent e) {
+                if (dragStart != null && onModClick != null) {
+                    onModClick.run();
+                }
                 dragStart = null;
             }
         });
@@ -190,14 +176,26 @@ public class ModListPanel extends JPanel {
         panel.setBackground(BG_COLOR);
         panel.setBorder(new EmptyBorder(0, 4, 0, 2));
 
-        JButton upBtn = createArrowButton("\u25B2", "上移", onMoveUp);
-        JButton downBtn = createArrowButton("\u25BC", "下移", onMoveDown);
+        JButton upBtn = createArrowButton("\u25B2", "上移", this::moveUp);
+        JButton downBtn = createArrowButton("\u25BC", "下移", this::moveDown);
 
         panel.add(upBtn);
         panel.add(Box.createVerticalStrut(1));
         panel.add(downBtn);
 
         return panel;
+    }
+
+    private void moveUp() {
+        if (onMoveUp != null) {
+            onMoveUp.run();
+        }
+    }
+
+    private void moveDown() {
+        if (onMoveDown != null) {
+            onMoveDown.run();
+        }
     }
 
     private JButton createArrowButton(String text, String tooltip, Runnable action) {
@@ -218,77 +216,6 @@ public class ModListPanel extends JPanel {
             }
         });
         return btn;
-    }
-
-    private void showThumbnailPopup() {
-        if (thumbnailImage == null) {
-            return;
-        }
-        if (previewTimer != null) {
-            previewTimer.stop();
-        }
-        previewTimer = new javax.swing.Timer(150, e -> {
-            if (hoverWindow != null && hoverWindow.isVisible()) {
-                return;
-            }
-            doShowThumbnailPopup();
-        });
-        previewTimer.setRepeats(false);
-        previewTimer.start();
-    }
-
-    private void doShowThumbnailPopup() {
-        if (thumbnailImage == null) {
-            return;
-        }
-
-        int maxWidth = 320;
-        int imgW = thumbnailImage.getWidth();
-        int imgH = thumbnailImage.getHeight();
-        if (imgW > maxWidth) {
-            double ratio = (double) maxWidth / imgW;
-            imgW = maxWidth;
-            imgH = (int) (imgH * ratio);
-        }
-
-        int finalW = imgW;
-        int finalH = imgH;
-        JPanel content = new JPanel(new BorderLayout()) {
-            @Override
-            protected void paintComponent(Graphics g) {
-                super.paintComponent(g);
-                Graphics2D g2 = (Graphics2D) g.create();
-                g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-                int x = (getWidth() - finalW) / 2;
-                int y = (getHeight() - finalH) / 2;
-                g2.drawImage(thumbnailImage, x, y, finalW, finalH, this);
-                g2.dispose();
-            }
-        };
-        content.setPreferredSize(new Dimension(imgW + 12, imgH + 12));
-        content.setBackground(new Color(43, 43, 43));
-        content.setBorder(BorderFactory.createLineBorder(new Color(80, 80, 80), 1));
-
-        if (hoverWindow == null || !hoverWindow.isDisplayable()) {
-            hoverWindow = new JWindow(SwingUtilities.getWindowAncestor(this));
-            hoverWindow.setBackground(new Color(0, 0, 0, 0));
-        }
-        hoverWindow.setContentPane(content);
-        hoverWindow.pack();
-
-        Point loc = getLocationOnScreen();
-        hoverWindow.setLocation(loc.x - hoverWindow.getWidth() - 10, loc.y);
-        hoverWindow.setVisible(true);
-    }
-
-    private void hideThumbnailPopup() {
-        if (previewTimer != null) {
-            previewTimer.stop();
-            previewTimer = null;
-        }
-        if (hoverWindow != null) {
-            hoverWindow.setVisible(false);
-        }
     }
 
     private boolean isClickOnButton(MouseEvent e) {

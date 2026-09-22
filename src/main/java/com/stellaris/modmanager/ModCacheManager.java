@@ -19,27 +19,17 @@ public class ModCacheManager {
     }
 
     public static class CacheEntry implements Serializable {
-        private static final long serialVersionUID = 1L;
+        private static final long serialVersionUID = 3L;
 
-        public String modName;
-        public String version;
-        public String supportedVersion;
-        public String thumbnailPath;
         public long folderSize;
         public long lastModified;
-        public String modPath;
 
         public CacheEntry() {
         }
 
         public CacheEntry(ModInfo info) {
-            this.modName = info.modName();
-            this.version = info.version();
-            this.supportedVersion = info.supportedVersion();
-            this.thumbnailPath = info.thumbnailPath();
             this.folderSize = info.folderSize();
             this.lastModified = info.lastModified();
-            this.modPath = info.modPath();
         }
 
         public boolean isUpToDate(Path modFolder) {
@@ -48,19 +38,6 @@ public class ModCacheManager {
             } catch (IOException e) {
                 return false;
             }
-        }
-
-        public ModInfo toModInfo(String folderName) {
-            return new ModInfo(
-                    folderName,
-                    modName,
-                    version,
-                    supportedVersion,
-                    modPath,
-                    thumbnailPath,
-                    folderSize,
-                    lastModified
-            );
         }
     }
 

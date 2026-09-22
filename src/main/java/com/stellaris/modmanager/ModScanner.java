@@ -13,7 +13,11 @@ public class ModScanner {
 
     private static final Logger LOG = Logger.getInstance(ModScanner.class);
 
-    private static final String WORKSHOP_RELATIVE_PATH = "steamapps/workshop/content/281990";
+    private static final String WORKSHOP_APP_ID = "281990";
+    private static final String WORKSHOP_RELATIVE_PATH = "steamapps/workshop/content/" + WORKSHOP_APP_ID;
+    private static final String WORKSHOP_ACF_NAME = "appworkshop_" + WORKSHOP_APP_ID + ".acf";
+    private static final String STEAM_REGISTRY_KEY = "HKCU\\Software\\Valve\\Steam";
+    private static final long REGISTRY_QUERY_TIMEOUT_SECONDS = 3;
 
     private static final List<String> WINDOWS_STEAM_PATHS = Arrays.asList(
             "C:/Program Files (x86)/Steam",
@@ -40,6 +44,15 @@ public class ModScanner {
 
     private static final Pattern QUOTED_VALUE_PATTERN = Pattern.compile("(\\w+)\\s*=\\s*\"([^\"]*)\"");
     private static final Pattern SINGLE_QUOTED_VALUE_PATTERN = Pattern.compile("(\\w+)\\s*=\\s*'([^']*)'");
+    private static final Pattern REGISTRY_STEAM_PATH_PATTERN =
+            Pattern.compile("^\\s*SteamPath\\s+REG_SZ\\s+(.+?)\\s*$");
+    private static final Pattern WORKSHOP_ITEM_ID_PATTERN = Pattern.compile("^\\s*\"(\\d+)\"\\s*$");
+    private static final Pattern WORKSHOP_ITEM_SIZE_PATTERN = Pattern.compile("\"size\"\\s+\"(\\d+)\"");
+    private static final Pattern WORKSHOP_ITEM_TIME_UPDATED_PATTERN =
+            Pattern.compile("\"timeupdated\"\\s+\"(\\d+)\"");
+
+    private record WorkshopItem(long size, long timeUpdated) {
+    }
 
     public static List<String> findWorkshopDirectories() {
         List<String> steamRoots = new ArrayList<>();
@@ -56,10 +69,11 @@ public class ModScanner {
         List<String> validWorkshopPaths = new ArrayList<>();
         for (String root : steamRoots) {
             Path workshopPath = Paths.get(root, WORKSHOP_RELATIVE_PATH);
-            if (Files.isDirectory(workshopPath)) {
-                validWorkshopPaths.add(workshopPath.toString());
-                LOG.info("Found workshop directory: " + workshopPath);
+            if (!Files.isDirectory(workshopPath) || containsPath(validWorkshopPaths, workshopPath)) {
+                continue;
             }
+            validWorkshopPaths.add(workshopPath.toString());
+            LOG.info("Found workshop directory: " + workshopPath);
         }
 
         if (validWorkshopPaths.isEmpty()) {
@@ -72,18 +86,76 @@ public class ModScanner {
     private static List<String> findWindowsSteamRoots() {
         List<String> roots = new ArrayList<>();
 
+        addIfDirectory(roots, readSteamPathFromRegistry());
         for (String defaultPath : WINDOWS_STEAM_PATHS) {
-            if (Files.isDirectory(Paths.get(defaultPath))) {
-                roots.add(defaultPath);
-            }
+            addIfDirectory(roots, defaultPath);
         }
 
         Path libraryFoldersVdf = findLibraryFoldersVdf(roots);
         if (libraryFoldersVdf != null) {
-            roots.addAll(parseWindowsLibraryFolders(libraryFoldersVdf));
+            for (String libraryPath : parseWindowsLibraryFolders(libraryFoldersVdf)) {
+                addIfDirectory(roots, libraryPath);
+            }
         }
 
         return roots;
+    }
+
+    private static String readSteamPathFromRegistry() {
+        Process process = null;
+        try {
+            process = new ProcessBuilder("reg", "query", STEAM_REGISTRY_KEY, "/v", "SteamPath")
+                    .redirectErrorStream(true)
+                    .start();
+            if (!process.waitFor(REGISTRY_QUERY_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                return null;
+            }
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    Matcher matcher = REGISTRY_STEAM_PATH_PATTERN.matcher(line);
+                    if (matcher.matches()) {
+                        return matcher.group(1);
+                    }
+                }
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (IOException e) {
+            LOG.warn("Failed to read Steam installation path from registry", e);
+        } finally {
+            if (process != null) {
+                process.destroy();
+            }
+        }
+        return null;
+    }
+
+    private static void addIfDirectory(List<String> paths, String path) {
+        if (path == null || path.isBlank()) {
+            return;
+        }
+        Path candidate = Paths.get(path);
+        if (!Files.isDirectory(candidate) || containsPath(paths, candidate)) {
+            return;
+        }
+        paths.add(candidate.toString());
+    }
+
+    private static boolean containsPath(List<String> paths, Path candidate) {
+        String key = canonicalKey(candidate);
+        for (String path : paths) {
+            if (canonicalKey(Paths.get(path)).equals(key)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String canonicalKey(Path path) {
+        return path.toAbsolutePath().normalize().toString().toLowerCase(Locale.ROOT);
     }
 
     private static Path findLibraryFoldersVdf(List<String> existingRoots) {
@@ -121,8 +193,10 @@ public class ModScanner {
     public static List<ModInfo> scanMods(String workshopPath,
                                           ConcurrentHashMap<String, ModCacheManager.CacheEntry> cache) {
         List<ModInfo> mods = new ArrayList<>();
+        Path workshopDir = Paths.get(workshopPath);
+        Map<String, WorkshopItem> workshopItems = readWorkshopItems(workshopDir);
 
-        try (Stream<Path> paths = Files.list(Paths.get(workshopPath))) {
+        try (Stream<Path> paths = Files.list(workshopDir)) {
             List<Path> modFolders = paths
                     .filter(Files::isDirectory)
                     .collect(Collectors.toList());
@@ -130,7 +204,7 @@ public class ModScanner {
             for (Path modFolder : modFolders) {
                 Path descriptorFile = modFolder.resolve("descriptor.mod");
                 if (Files.exists(descriptorFile)) {
-                    ModInfo modInfo = parseDescriptorFile(modFolder, descriptorFile, cache);
+                    ModInfo modInfo = parseDescriptorFile(modFolder, descriptorFile, cache, workshopItems);
                     if (modInfo != null) {
                         mods.add(modInfo);
                     }
@@ -143,8 +217,67 @@ public class ModScanner {
         return mods;
     }
 
+    private static Map<String, WorkshopItem> readWorkshopItems(Path workshopPath) {
+        Map<String, WorkshopItem> items = new HashMap<>();
+        Path contentDir = workshopPath.getParent();
+        Path workshopDir = contentDir == null ? null : contentDir.getParent();
+        if (workshopDir == null) {
+            return items;
+        }
+
+        Path acfFile = workshopDir.resolve(WORKSHOP_ACF_NAME);
+        if (!Files.isRegularFile(acfFile)) {
+            return items;
+        }
+
+        try {
+            String currentId = null;
+            long currentSize = 0;
+            long currentTimeUpdated = 0;
+            for (String line : Files.readAllLines(acfFile)) {
+                Matcher idMatcher = WORKSHOP_ITEM_ID_PATTERN.matcher(line);
+                if (idMatcher.matches()) {
+                    if (currentId != null) {
+                        mergeItem(items, currentId, currentSize, currentTimeUpdated);
+                    }
+                    currentId = idMatcher.group(1);
+                    currentSize = 0;
+                    currentTimeUpdated = 0;
+                    continue;
+                }
+                if (currentId == null) {
+                    continue;
+                }
+                Matcher sizeMatcher = WORKSHOP_ITEM_SIZE_PATTERN.matcher(line);
+                if (sizeMatcher.find()) {
+                    currentSize = Long.parseLong(sizeMatcher.group(1));
+                    continue;
+                }
+                Matcher timeMatcher = WORKSHOP_ITEM_TIME_UPDATED_PATTERN.matcher(line);
+                if (timeMatcher.find()) {
+                    currentTimeUpdated = Long.parseLong(timeMatcher.group(1));
+                }
+            }
+            if (currentId != null) {
+                mergeItem(items, currentId, currentSize, currentTimeUpdated);
+            }
+        } catch (IOException | NumberFormatException e) {
+            LOG.warn("Failed to read workshop item records: " + acfFile, e);
+        }
+
+        return items;
+    }
+
+    private static void mergeItem(Map<String, WorkshopItem> items, String id, long size, long timeUpdated) {
+        items.merge(id, new WorkshopItem(size, timeUpdated),
+                (existing, added) -> new WorkshopItem(
+                        Math.max(existing.size(), added.size()),
+                        Math.max(existing.timeUpdated(), added.timeUpdated())));
+    }
+
     private static ModInfo parseDescriptorFile(Path modFolder, Path descriptorFile,
-                                                ConcurrentHashMap<String, ModCacheManager.CacheEntry> cache) {
+                                                ConcurrentHashMap<String, ModCacheManager.CacheEntry> cache,
+                                                Map<String, WorkshopItem> workshopItems) {
         try {
             String content = Files.readString(descriptorFile);
 
@@ -161,21 +294,19 @@ public class ModScanner {
             }
 
             long lastModified = getLastModified(modFolder);
+            WorkshopItem item = workshopItems.get(folderName);
             ModCacheManager.CacheEntry cached = cache.get(folderName);
 
-            String thumbnailPath;
             long folderSize;
-
-            if (cached != null && cached.isUpToDate(modFolder)) {
-                thumbnailPath = cached.thumbnailPath;
+            if (item != null && item.size() > 0) {
+                folderSize = item.size();
+            } else if (cached != null && cached.isUpToDate(modFolder)) {
                 folderSize = cached.folderSize;
-                if (thumbnailPath != null && !Files.isRegularFile(Paths.get(thumbnailPath))) {
-                    thumbnailPath = findThumbnail(modFolder);
-                }
             } else {
-                thumbnailPath = findThumbnail(modFolder);
                 folderSize = calculateFolderSize(modFolder);
             }
+
+            String thumbnailPath = findThumbnail(modFolder, values.get("picture"));
 
             if (version == null) {
                 version = "N/A";
@@ -200,7 +331,14 @@ public class ModScanner {
         }
     }
 
-    private static String findThumbnail(Path modFolder) {
+    private static String findThumbnail(Path modFolder, String picture) {
+        if (picture != null && !picture.isBlank()) {
+            Path declaredPicture = modFolder.resolve(picture.replace('\\', '/'));
+            if (Files.isRegularFile(declaredPicture)) {
+                return declaredPicture.toString();
+            }
+        }
+
         for (String name : THUMBNAIL_NAMES) {
             Path thumbnailFile = modFolder.resolve(name);
             if (Files.isRegularFile(thumbnailFile)) {

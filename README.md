@@ -5,7 +5,7 @@
 ## 功能特性
 
 - 自动检测 Steam Workshop 目录（支持 Windows / macOS / Linux）
-- Windows 下自动解析 `libraryfolders.vdf`，支持多 Steam 库路径
+- Windows 下读取注册表中的 Steam 安装位置并解析 `libraryfolders.vdf`，支持多 Steam 库路径
 - 读取 `descriptor.mod` 文件提取模组信息（名称、版本、支持版本）
 - 颜色编码显示模组信息
   - 文件夹名：白色
@@ -14,7 +14,10 @@
   - 支持版本：绿色
 - 点击模组直接在 IDE 中打开项目
 - 异步加载，不阻塞 UI
-- 自动检测缩略图（`thumbnail.png` / `thumb.png` / `preview.png` 等），鼠标悬浮时左侧弹出预览
+- 自动检测缩略图（优先用 `descriptor.mod` 里的 `picture` 字段，其次 `thumbnail.png` / `thumb.png` / `preview.png` 等），图标视图直接显示在卡片上
+- GIF 动图封面（含改后缀的）逐帧播放：图标视图播放鼠标悬停的那张卡片，列表视图在左侧悬浮预览里播放
+- 本地没有封面的模组自动从 Steam 查询并下载 workshop 预览图（结果缓存在本地，失败静默回退到占位图）
+- 模组体积直接读取 Steam 的 `appworkshop_281990.acf` 记录，冷扫描约 40ms
 - 列表 / 图标双视图（默认图标视图），工具栏切换按钮
 - 图标视图自适应行列布局，缩略图 128x128 等比缩放居中
 - 拖拽重排：拖拽手柄拖动整行 / 图标卡片，蓝色高亮标记插入位置

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 13 13">
+  <!-- 模组列表 -->
+  <rect x="1" y="2.5" width="5.5" height="2" rx="1" fill="#CED0D6"/>
+  <rect x="1" y="5.5" width="11" height="2" rx="1" fill="#CED0D6"/>
+  <rect x="1" y="8.5" width="8" height="2" rx="1" fill="#CED0D6"/>
+  <!-- Stellaris：四角星芒 -->
+  <path d="M10.1 1.5 L11.09 3.01 L12.6 4 L11.09 4.99 L10.1 6.5 L9.11 4.99 L7.6 4 L9.11 3.01 Z" fill="#CED0D6"/>
+</svg>

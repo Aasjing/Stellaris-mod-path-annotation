@@ -10,13 +10,16 @@ import java.awt.datatransfer.Transferable;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
+import java.util.List;
 import java.util.function.BiConsumer;
 
 public class ModCardPanel extends JPanel {
 
     private static final int CARD_WIDTH = 156;
-    private static final int CARD_HEIGHT = 175;
-    private static final int THUMB_SIZE = 128;
+    private static final int CARD_BORDER = 1;
+    private static final int CARD_PADDING = 8;
+    private static final int IMAGE_SIZE = CARD_WIDTH - (CARD_BORDER + CARD_PADDING) * 2;
+    private static final int DEFAULT_FRAME_DELAY_MS = 100;
 
     private static final Color BG_COLOR = new Color(43, 43, 43);
     private static final Color BG_HOVER_COLOR = new Color(50, 50, 50);
@@ -28,12 +31,12 @@ public class ModCardPanel extends JPanel {
 
     static {
         normalBorder = BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(BORDER_COLOR, 1),
-                new EmptyBorder(8, 8, 8, 8)
+                BorderFactory.createLineBorder(BORDER_COLOR, CARD_BORDER),
+                new EmptyBorder(CARD_PADDING, CARD_PADDING, CARD_PADDING, CARD_PADDING)
         );
         dropHighlightBorder = BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(DROP_HIGHLIGHT_COLOR, 2),
-                new EmptyBorder(7, 7, 7, 7)
+                new EmptyBorder(CARD_PADDING - 1, CARD_PADDING - 1, CARD_PADDING - 1, CARD_PADDING - 1)
         );
     }
 
@@ -42,15 +45,21 @@ public class ModCardPanel extends JPanel {
     private BiConsumer<Integer, ModCardPanel> onDragDrop;
     private BufferedImage thumbnailImage;
     private JPanel thumbnailPanelRef;
-    private JWindow hoverWindow;
     private Point dragStart;
-    private javax.swing.Timer previewTimer;
+    private String thumbnailSource;
+    private List<BufferedImage> animationFrames;
+    private int[] animationDelays;
+    private BufferedImage animationFrame;
+    private int animationIndex;
+    private Timer animationTimer;
+    private boolean hovered;
 
     public ModCardPanel(ModInfo modInfo, Runnable onModClick,
                         BiConsumer<Integer, ModCardPanel> onDragDrop) {
         this.currentMod = modInfo;
         this.onModClick = onModClick;
         this.onDragDrop = onDragDrop;
+        this.thumbnailSource = modInfo.thumbnailPath();
         initializePanel();
         loadThumbnailAsync();
     }
@@ -62,28 +71,35 @@ public class ModCardPanel extends JPanel {
     }
 
     private void loadThumbnailAsync() {
-        if (currentMod.thumbnailPath() != null) {
-            ThumbnailCache.loadAsync(
-                    currentMod.thumbnailPath(),
-                    currentMod.folderName(),
-                    THUMB_SIZE,
-                    image -> {
-                        thumbnailImage = image;
-                        if (thumbnailPanelRef != null) {
-                            thumbnailPanelRef.repaint();
-                        }
-                    }
-            );
+        if (thumbnailSource != null) {
+            loadThumbnail(thumbnailSource);
+            return;
         }
+        WorkshopPreview.resolveAsync(currentMod.folderName(), path -> {
+            if (path == null) {
+                return;
+            }
+            thumbnailSource = path;
+            loadThumbnail(path);
+        });
+    }
+
+    private void loadThumbnail(String sourcePath) {
+        ThumbnailCache.loadAsync(
+                sourcePath,
+                currentMod.folderName(),
+                IMAGE_SIZE,
+                image -> {
+                    thumbnailImage = image;
+                    repaintThumbnail();
+                }
+        );
     }
 
     private void initializePanel() {
         setLayout(new BorderLayout());
         setBorder(normalBorder);
         setBackground(BG_COLOR);
-        setPreferredSize(new Dimension(CARD_WIDTH, CARD_HEIGHT));
-        setMaximumSize(new Dimension(CARD_WIDTH, CARD_HEIGHT));
-        setMinimumSize(new Dimension(CARD_WIDTH, CARD_HEIGHT));
         setTransferHandler(new CardTransferHandler());
 
         JPanel thumbnailPanel = createThumbnailPanel();
@@ -91,6 +107,12 @@ public class ModCardPanel extends JPanel {
 
         JPanel infoPanel = createInfoPanel();
         add(infoPanel, BorderLayout.SOUTH);
+
+        Dimension size = new Dimension(CARD_WIDTH,
+                IMAGE_SIZE + infoPanel.getPreferredSize().height + (CARD_BORDER + CARD_PADDING) * 2);
+        setPreferredSize(size);
+        setMaximumSize(size);
+        setMinimumSize(size);
 
         addMouseListener(new MouseAdapter() {
             @Override
@@ -102,18 +124,88 @@ public class ModCardPanel extends JPanel {
 
             @Override
             public void mouseEntered(MouseEvent e) {
+                hovered = true;
                 setBackground(BG_HOVER_COLOR);
                 repaint();
-                showLargePreview();
+                startAnimation();
             }
 
             @Override
             public void mouseExited(MouseEvent e) {
+                hovered = false;
+                stopAnimation();
                 setBackground(BG_COLOR);
                 repaint();
-                hideLargePreview();
             }
         });
+    }
+
+    @Override
+    public void removeNotify() {
+        super.removeNotify();
+        hovered = false;
+        stopAnimation();
+    }
+
+    private void startAnimation() {
+        if (animationFrames != null) {
+            startAnimationTimer();
+            return;
+        }
+        if (thumbnailSource == null) {
+            return;
+        }
+        ThumbnailCache.loadFramesAsync(thumbnailSource, currentMod.folderName(), IMAGE_SIZE, animation -> {
+            if (animation == null || animation.frames().size() < 2) {
+                return;
+            }
+            animationFrames = animation.frames();
+            animationDelays = animation.delaysMs();
+            if (hovered) {
+                startAnimationTimer();
+            }
+        });
+    }
+
+    private void startAnimationTimer() {
+        if (animationFrames == null || animationFrames.size() < 2 || animationTimer != null) {
+            return;
+        }
+        animationTimer = new Timer(frameDelay(), e -> showNextFrame());
+        animationTimer.setCoalesce(true);
+        animationTimer.start();
+    }
+
+    private void showNextFrame() {
+        animationIndex = (animationIndex + 1) % animationFrames.size();
+        animationFrame = animationFrames.get(animationIndex);
+        if (animationTimer != null) {
+            animationTimer.setDelay(frameDelay());
+        }
+        repaintThumbnail();
+    }
+
+    private int frameDelay() {
+        if (animationDelays == null || animationDelays.length == 0) {
+            return DEFAULT_FRAME_DELAY_MS;
+        }
+        return animationDelays[Math.min(animationIndex, animationDelays.length - 1)];
+    }
+
+    private void stopAnimation() {
+        if (animationTimer != null) {
+            animationTimer.stop();
+            animationTimer = null;
+        }
+        animationFrame = null;
+        animationIndex = 0;
+        repaintThumbnail();
+    }
+
+    private void repaintThumbnail() {
+        if (thumbnailPanelRef != null) {
+            thumbnailPanelRef.repaint();
+        }
     }
 
     public void setDropHighlight(boolean highlight) {
@@ -130,56 +222,54 @@ public class ModCardPanel extends JPanel {
         }
     }
 
-    @Override
-    public void removeNotify() {
-        super.removeNotify();
-        if (previewTimer != null) {
-            previewTimer.stop();
-            previewTimer = null;
-        }
-        if (hoverWindow != null) {
-            hoverWindow.dispose();
-            hoverWindow = null;
-        }
-    }
-
     private JPanel createThumbnailPanel() {
         JPanel panel = new JPanel(new BorderLayout()) {
             @Override
             protected void paintComponent(Graphics g) {
                 super.paintComponent(g);
-                if (thumbnailImage != null) {
-                    Graphics2D g2 = (Graphics2D) g.create();
-                    g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-
-                    int imgW = thumbnailImage.getWidth();
-                    int imgH = thumbnailImage.getHeight();
-                    double scale = Math.min((double) THUMB_SIZE / imgW, (double) THUMB_SIZE / imgH);
-                    int drawW = (int) (imgW * scale);
-                    int drawH = (int) (imgH * scale);
-                    int x = (getWidth() - drawW) / 2;
-                    int y = (getHeight() - drawH) / 2;
-
-                    g2.drawImage(thumbnailImage, x, y, drawW, drawH, this);
-                    g2.dispose();
-                } else {
-                    g.setColor(new Color(80, 80, 80));
-                    int iconSize = 48;
-                    int x = (getWidth() - iconSize) / 2;
-                    int y = (getHeight() - iconSize) / 2;
-                    g.fillRect(x, y, iconSize, iconSize);
-                    g.setColor(new Color(120, 120, 120));
-                    g.setFont(new Font("SansSerif", Font.PLAIN, 11));
-                    String text = "N/A";
-                    FontMetrics fm = g.getFontMetrics();
-                    int tx = (getWidth() - fm.stringWidth(text)) / 2;
-                    int ty = y + iconSize / 2 + fm.getAscent() / 2;
-                    g.drawString(text, tx, ty);
+                BufferedImage image = animationFrame != null ? animationFrame : thumbnailImage;
+                if (image == null) {
+                    paintPlaceholder(g);
+                    return;
                 }
+
+                int boxWidth = getWidth();
+                int boxHeight = getHeight();
+                double scale = Math.min((double) boxWidth / image.getWidth(),
+                        (double) boxHeight / image.getHeight());
+                int drawWidth = Math.max(1, (int) Math.round(image.getWidth() * scale));
+                int drawHeight = Math.max(1, (int) Math.round(image.getHeight() * scale));
+
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+                g2.drawImage(image, (boxWidth - drawWidth) / 2, (boxHeight - drawHeight) / 2,
+                        drawWidth, drawHeight, this);
+                g2.dispose();
+            }
+
+            private void paintPlaceholder(Graphics g) {
+                int size = Math.min(getWidth(), getHeight()) - 24;
+                if (size <= 0) {
+                    return;
+                }
+                int x = (getWidth() - size) / 2;
+                int y = (getHeight() - size) / 2;
+
+                float hue = (currentMod.folderName().hashCode() & 0x7fffffff) % 360 / 360f;
+                g.setColor(Color.getHSBColor(hue, 0.35f, 0.55f));
+                g.fillRoundRect(x, y, size, size, 16, 16);
+
+                String name = currentMod.modName();
+                String initial = name.isEmpty() ? "?" : name.substring(0, 1).toUpperCase();
+                g.setFont(new Font("SansSerif", Font.BOLD, size / 2));
+                g.setColor(new Color(235, 235, 235));
+                FontMetrics fm = g.getFontMetrics();
+                g.drawString(initial, x + (size - fm.stringWidth(initial)) / 2,
+                        y + (size + fm.getAscent() - fm.getDescent()) / 2);
             }
         };
         panel.setBackground(new Color(37, 37, 37));
-        panel.setPreferredSize(new Dimension(THUMB_SIZE, THUMB_SIZE));
+        panel.setPreferredSize(new Dimension(IMAGE_SIZE, IMAGE_SIZE));
         panel.setCursor(new Cursor(Cursor.MOVE_CURSOR));
 
         panel.addMouseListener(new MouseAdapter() {
@@ -191,6 +281,9 @@ public class ModCardPanel extends JPanel {
 
             @Override
             public void mouseReleased(MouseEvent e) {
+                if (dragStart != null && onModClick != null) {
+                    onModClick.run();
+                }
                 dragStart = null;
             }
         });
@@ -240,77 +333,6 @@ public class ModCardPanel extends JPanel {
         panel.add(Box.createVerticalStrut(2));
         panel.add(versionLabel);
         return panel;
-    }
-
-    private void showLargePreview() {
-        if (thumbnailImage == null) {
-            return;
-        }
-        if (previewTimer != null) {
-            previewTimer.stop();
-        }
-        previewTimer = new javax.swing.Timer(150, e -> {
-            if (hoverWindow != null && hoverWindow.isVisible()) {
-                return;
-            }
-            doShowLargePreview();
-        });
-        previewTimer.setRepeats(false);
-        previewTimer.start();
-    }
-
-    private void doShowLargePreview() {
-        if (thumbnailImage == null) {
-            return;
-        }
-
-        int maxWidth = 400;
-        int imgW = thumbnailImage.getWidth();
-        int imgH = thumbnailImage.getHeight();
-        if (imgW > maxWidth) {
-            double ratio = (double) maxWidth / imgW;
-            imgW = maxWidth;
-            imgH = (int) (imgH * ratio);
-        }
-
-        int finalW = imgW;
-        int finalH = imgH;
-        JPanel content = new JPanel(new BorderLayout()) {
-            @Override
-            protected void paintComponent(Graphics g) {
-                super.paintComponent(g);
-                Graphics2D g2 = (Graphics2D) g.create();
-                g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-                int x = (getWidth() - finalW) / 2;
-                int y = (getHeight() - finalH) / 2;
-                g2.drawImage(thumbnailImage, x, y, finalW, finalH, this);
-                g2.dispose();
-            }
-        };
-        content.setPreferredSize(new Dimension(imgW + 12, imgH + 12));
-        content.setBackground(new Color(43, 43, 43));
-        content.setBorder(BorderFactory.createLineBorder(new Color(80, 80, 80), 1));
-
-        if (hoverWindow == null || !hoverWindow.isDisplayable()) {
-            hoverWindow = new JWindow(SwingUtilities.getWindowAncestor(this));
-            hoverWindow.setBackground(new Color(0, 0, 0, 0));
-        }
-        hoverWindow.setContentPane(content);
-        hoverWindow.pack();
-
-        Point loc = getLocationOnScreen();
-        hoverWindow.setLocation(loc.x - hoverWindow.getWidth() - 10, loc.y);
-        hoverWindow.setVisible(true);
-    }
-
-    private void hideLargePreview() {
-        if (previewTimer != null) {
-            previewTimer.stop();
-            previewTimer = null;
-        }
-        if (hoverWindow != null) {
-            hoverWindow.setVisible(false);
-        }
     }
 
     private String truncateText(String text, int maxLen) {

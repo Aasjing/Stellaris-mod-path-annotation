@@ -13,7 +13,7 @@ public class SortAction extends AnAction {
     private final ModManagerPanel panel;
 
     public SortAction(ModManagerPanel panel) {
-        super("排序", "按名称/大小/时间排序", AllIcons.Actions.Find);
+        super("排序", "按名称/大小/时间排序", AllIcons.ObjectBrowser.Sorted);
         this.panel = panel;
     }
 

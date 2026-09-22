@@ -6,9 +6,15 @@ import com.intellij.openapi.project.Project;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import java.awt.*;
+import java.awt.event.ActionEvent;
+import java.awt.event.KeyEvent;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.*;
 import java.util.stream.Collectors;
 
@@ -16,11 +22,18 @@ public class ModManagerPanel extends JPanel {
 
     private static final Logger LOG = Logger.getInstance(ModManagerPanel.class);
 
+    private static final String SEARCH_PLACEHOLDER = "搜索模组（名称 / ID / 版本）";
+    private static final int FILTER_DELAY_MS = 200;
+
     private final Project project;
     private JPanel modListContainer;
     private JLabel statusLabel;
+    private JTextField searchField;
     private SwingWorker<List<ModInfo>, Void> currentWorker;
     private List<ModInfo> cachedMods;
+    private List<ModInfo> visibleMods;
+    private String statusSuffix = "图标视图";
+    private Timer filterTimer;
     private boolean gridView = true;
 
     public ModManagerPanel(Project project) {
@@ -36,36 +49,31 @@ public class ModManagerPanel extends JPanel {
 
     public void setGridView(boolean grid) {
         this.gridView = grid;
-        if (cachedMods != null) {
-            rebuildModList(cachedMods);
+        statusSuffix = grid ? "图标视图" : "列表视图";
+        if (visibleMods != null) {
+            rebuildModList(visibleMods);
         }
     }
 
     public void sortByName() {
-        if (cachedMods == null || cachedMods.isEmpty()) {
-            return;
-        }
-        cachedMods.sort((a, b) -> String.CASE_INSENSITIVE_ORDER.compare(a.modName(), b.modName()));
-        rebuildModList(cachedMods);
-        statusLabel.setText("找到 " + cachedMods.size() + " 个模组 (按名称排序)");
+        sortMods(Comparator.comparing(ModInfo::modName, String.CASE_INSENSITIVE_ORDER), "按名称排序");
     }
 
     public void sortBySize() {
-        if (cachedMods == null || cachedMods.isEmpty()) {
-            return;
-        }
-        cachedMods.sort((a, b) -> Long.compare(b.folderSize(), a.folderSize()));
-        rebuildModList(cachedMods);
-        statusLabel.setText("找到 " + cachedMods.size() + " 个模组 (按大小排序)");
+        sortMods(Comparator.comparingLong(ModInfo::folderSize).reversed(), "按大小排序");
     }
 
     public void sortByTime() {
+        sortMods(Comparator.comparingLong(ModInfo::lastModified).reversed(), "按时间排序");
+    }
+
+    private void sortMods(Comparator<ModInfo> comparator, String suffix) {
         if (cachedMods == null || cachedMods.isEmpty()) {
             return;
         }
-        cachedMods.sort((a, b) -> Long.compare(b.lastModified(), a.lastModified()));
-        rebuildModList(cachedMods);
-        statusLabel.setText("找到 " + cachedMods.size() + " 个模组 (按时间排序)");
+        cachedMods.sort(comparator);
+        statusSuffix = suffix;
+        applyFilter();
     }
 
     private void cancelCurrentWorker() {
@@ -79,8 +87,8 @@ public class ModManagerPanel extends JPanel {
         setBackground(new Color(43, 43, 43));
         setPreferredSize(new Dimension(520, 400));
 
-        JScrollPane scrollPane = createScrollPane();
-        add(scrollPane, BorderLayout.CENTER);
+        add(createSearchPanel(), BorderLayout.NORTH);
+        add(createScrollPane(), BorderLayout.CENTER);
 
         statusLabel = new JLabel("准备就绪");
         statusLabel.setBorder(new EmptyBorder(5, 10, 5, 10));
@@ -88,8 +96,64 @@ public class ModManagerPanel extends JPanel {
         add(statusLabel, BorderLayout.SOUTH);
     }
 
+    private JPanel createSearchPanel() {
+        searchField = new JTextField() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                if (!getText().isEmpty() || isFocusOwner()) {
+                    return;
+                }
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
+                        RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+                g2.setColor(new Color(120, 120, 120));
+                g2.setFont(getFont());
+                FontMetrics metrics = g2.getFontMetrics();
+                g2.drawString(SEARCH_PLACEHOLDER, getInsets().left,
+                        (getHeight() + metrics.getAscent() - metrics.getDescent()) / 2);
+                g2.dispose();
+            }
+        };
+        searchField.setBackground(new Color(55, 55, 55));
+        searchField.setForeground(new Color(220, 220, 220));
+        searchField.setCaretColor(new Color(220, 220, 220));
+        searchField.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(70, 70, 70), 1),
+                new EmptyBorder(4, 6, 4, 6)));
+        searchField.getDocument().addDocumentListener(new DocumentListener() {
+            @Override
+            public void insertUpdate(DocumentEvent e) {
+                scheduleFilter();
+            }
+
+            @Override
+            public void removeUpdate(DocumentEvent e) {
+                scheduleFilter();
+            }
+
+            @Override
+            public void changedUpdate(DocumentEvent e) {
+                scheduleFilter();
+            }
+        });
+        searchField.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), "clearFilter");
+        searchField.getActionMap().put("clearFilter", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                searchField.setText("");
+            }
+        });
+
+        JPanel panel = new JPanel(new BorderLayout());
+        panel.setBackground(new Color(43, 43, 43));
+        panel.setBorder(new EmptyBorder(6, 8, 4, 8));
+        panel.add(searchField, BorderLayout.CENTER);
+        return panel;
+    }
+
     private JScrollPane createScrollPane() {
-        modListContainer = new JPanel();
+        modListContainer = new ScrollablePanel();
         modListContainer.setLayout(new BoxLayout(modListContainer, BoxLayout.Y_AXIS));
         modListContainer.setBackground(new Color(43, 43, 43));
 
@@ -101,8 +165,40 @@ public class ModManagerPanel extends JPanel {
         return scrollPane;
     }
 
+    private void scheduleFilter() {
+        if (filterTimer == null) {
+            filterTimer = new Timer(FILTER_DELAY_MS, e -> applyFilter());
+            filterTimer.setRepeats(false);
+        }
+        filterTimer.restart();
+    }
+
+    private void applyFilter() {
+        if (cachedMods == null || searchField == null) {
+            return;
+        }
+        String query = searchField.getText().trim().toLowerCase(Locale.ROOT);
+        if (query.isEmpty()) {
+            visibleMods = cachedMods;
+        } else {
+            visibleMods = cachedMods.stream()
+                    .filter(mod -> matches(mod, query))
+                    .collect(Collectors.toList());
+        }
+        rebuildModList(visibleMods);
+    }
+
+    private boolean matches(ModInfo mod, String query) {
+        return mod.modName().toLowerCase(Locale.ROOT).contains(query)
+                || mod.folderName().toLowerCase(Locale.ROOT).contains(query)
+                || mod.version().toLowerCase(Locale.ROOT).contains(query)
+                || mod.supportedVersion().toLowerCase(Locale.ROOT).contains(query);
+    }
+
     private void loadMods() {
         modListContainer.removeAll();
+        modListContainer.revalidate();
+        modListContainer.repaint();
         statusLabel.setText("正在扫描模组...");
 
         currentWorker = new SwingWorker<>() {
@@ -153,18 +249,12 @@ public class ModManagerPanel extends JPanel {
                 }
                 try {
                     List<ModInfo> mods = get();
-
-                    if (mods == null || mods.isEmpty()) {
-                        showNoModsFound();
-                        return;
-                    }
-
-                    cachedMods = mods;
-                    rebuildModList(mods);
+                    cachedMods = mods == null ? new ArrayList<>() : mods;
+                    applyFilter();
 
                     ConcurrentHashMap<String, ModCacheManager.CacheEntry> cache =
                             new ConcurrentHashMap<>();
-                    for (ModInfo mod : mods) {
+                    for (ModInfo mod : cachedMods) {
                         cache.put(mod.folderName(),
                                 new ModCacheManager.CacheEntry(mod));
                     }
@@ -181,13 +271,20 @@ public class ModManagerPanel extends JPanel {
     }
 
     private void rebuildModList(List<ModInfo> mods) {
+        ThumbnailPreview.hide();
         modListContainer.removeAll();
 
-        if (gridView) {
+        if (mods == null || mods.isEmpty()) {
+            JLabel emptyLabel = new JLabel(cachedMods == null || cachedMods.isEmpty()
+                    ? "未找到 Stellaris Workshop 目录或模组"
+                    : "没有匹配的模组");
+            emptyLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
+            emptyLabel.setForeground(new Color(187, 187, 187));
+            emptyLabel.setBorder(new EmptyBorder(20, 10, 20, 10));
+            modListContainer.add(emptyLabel);
+        } else if (gridView) {
             modListContainer.setLayout(new WrapLayout(FlowLayout.LEFT, 8, 8));
-            for (int i = 0; i < mods.size(); i++) {
-                ModInfo mod = mods.get(i);
-                int index = i;
+            for (ModInfo mod : mods) {
                 ModCardPanel card = new ModCardPanel(mod,
                         () -> openModProject(mod),
                         (sourceIdx, targetPanel) -> {
@@ -199,7 +296,6 @@ public class ModManagerPanel extends JPanel {
                 );
                 modListContainer.add(card);
             }
-            statusLabel.setText("找到 " + mods.size() + " 个模组 (图标视图)");
         } else {
             modListContainer.setLayout(new BoxLayout(modListContainer, BoxLayout.Y_AXIS));
             for (int i = 0; i < mods.size(); i++) {
@@ -218,11 +314,26 @@ public class ModManagerPanel extends JPanel {
                 );
                 modListContainer.add(modPanel);
             }
-            statusLabel.setText("找到 " + mods.size() + " 个模组");
         }
 
         modListContainer.revalidate();
         modListContainer.repaint();
+        updateStatus(mods == null ? 0 : mods.size());
+    }
+
+    private void updateStatus(int shown) {
+        if (cachedMods == null || cachedMods.isEmpty()) {
+            statusLabel.setText("未找到模组");
+            return;
+        }
+        StringBuilder text = new StringBuilder("找到 ").append(shown).append(" 个模组");
+        if (shown != cachedMods.size()) {
+            text.append(" / 共 ").append(cachedMods.size());
+        }
+        if (!statusSuffix.isEmpty()) {
+            text.append(" (").append(statusSuffix).append(')');
+        }
+        statusLabel.setText(text.toString());
     }
 
     private int findPanelIndex(Component target) {
@@ -235,72 +346,42 @@ public class ModManagerPanel extends JPanel {
     }
 
     private void moveMod(int fromIndex, int toIndex) {
-        if (fromIndex < 0 || toIndex < 0) {
+        if (visibleMods == null || cachedMods == null) {
             return;
         }
-        int count = modListContainer.getComponentCount();
-        if (fromIndex >= count || toIndex >= count) {
+        int count = visibleMods.size();
+        if (fromIndex < 0 || toIndex < 0 || fromIndex >= count || toIndex >= count
+                || fromIndex == toIndex) {
             return;
         }
-        if (fromIndex == toIndex) {
+
+        ModInfo moved = visibleMods.get(fromIndex);
+        ModInfo target = visibleMods.get(toIndex);
+        int from = cachedMods.indexOf(moved);
+        if (from < 0) {
             return;
         }
 
-        Component comp = modListContainer.getComponent(fromIndex);
-        modListContainer.remove(fromIndex);
-        modListContainer.add(comp, toIndex);
+        cachedMods.remove(from);
+        int to = cachedMods.indexOf(target);
+        if (to < 0) {
+            cachedMods.add(moved);
+        } else {
+            cachedMods.add(toIndex > fromIndex ? to + 1 : to, moved);
+        }
 
-        ModInfo moved = cachedMods.remove(fromIndex);
-        cachedMods.add(toIndex, moved);
+        applyFilter();
+        scrollToIndex(toIndex);
+    }
 
-        refreshAllPanelCallbacks();
-        modListContainer.revalidate();
-        modListContainer.repaint();
-
-        if (comp instanceof JComponent jc) {
+    private void scrollToIndex(int index) {
+        if (index < 0 || index >= modListContainer.getComponentCount()) {
+            return;
+        }
+        Component component = modListContainer.getComponent(index);
+        if (component instanceof JComponent jc) {
             jc.scrollRectToVisible(jc.getBounds());
         }
-    }
-
-    private void refreshAllPanelCallbacks() {
-        for (int i = 0; i < modListContainer.getComponentCount(); i++) {
-            Component comp = modListContainer.getComponent(i);
-            if (comp instanceof ModListPanel panel) {
-                ModInfo mod = cachedMods.get(i);
-                int index = i;
-                panel.updateCallbacks(
-                        () -> openModProject(mod),
-                        () -> moveMod(index, index - 1),
-                        () -> moveMod(index, index + 1),
-                        (sourceIdx, targetPanel) -> {
-                            int targetIdx = findPanelIndex(targetPanel);
-                            if (targetIdx >= 0) {
-                                moveMod(sourceIdx, targetIdx);
-                            }
-                        }
-                );
-            } else if (comp instanceof ModCardPanel card) {
-                ModInfo mod = cachedMods.get(i);
-                card.updateCallbacks(
-                        () -> openModProject(mod),
-                        (sourceIdx, targetPanel) -> {
-                            int targetIdx = findPanelIndex(targetPanel);
-                            if (targetIdx >= 0) {
-                                moveMod(sourceIdx, targetIdx);
-                            }
-                        }
-                );
-            }
-        }
-    }
-
-    private void showNoModsFound() {
-        JLabel noModsLabel = new JLabel("未找到 Stellaris Workshop 目录或模组");
-        noModsLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
-        noModsLabel.setForeground(new Color(187, 187, 187));
-        noModsLabel.setBorder(new EmptyBorder(20, 10, 20, 10));
-        modListContainer.add(noModsLabel);
-        statusLabel.setText("未找到模组");
     }
 
     private void openModProject(ModInfo modInfo) {
