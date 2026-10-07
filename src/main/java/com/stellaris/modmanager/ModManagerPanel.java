@@ -275,13 +275,7 @@ public class ModManagerPanel extends JPanel {
         modListContainer.removeAll();
 
         if (mods == null || mods.isEmpty()) {
-            JLabel emptyLabel = new JLabel(cachedMods == null || cachedMods.isEmpty()
-                    ? "未找到 Stellaris Workshop 目录或模组"
-                    : "没有匹配的模组");
-            emptyLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
-            emptyLabel.setForeground(new Color(187, 187, 187));
-            emptyLabel.setBorder(new EmptyBorder(20, 10, 20, 10));
-            modListContainer.add(emptyLabel);
+            modListContainer.add(createEmptyPanel());
         } else if (gridView) {
             modListContainer.setLayout(new WrapLayout(FlowLayout.LEFT, 8, 8));
             for (ModInfo mod : mods) {
@@ -321,6 +315,62 @@ public class ModManagerPanel extends JPanel {
         updateStatus(mods == null ? 0 : mods.size());
     }
 
+    private JPanel createEmptyPanel() {
+        boolean noModsFound = cachedMods == null || cachedMods.isEmpty();
+        String query = searchField == null ? "" : searchField.getText().trim();
+
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBackground(new Color(43, 43, 43));
+
+        JLabel label = new JLabel(noModsFound
+                ? "未找到 Stellaris Workshop 目录或模组"
+                : "没有匹配的模组" + (query.isEmpty() ? "" : "：" + query));
+        label.setAlignmentX(Component.CENTER_ALIGNMENT);
+        label.setForeground(new Color(187, 187, 187));
+        label.setBorder(new EmptyBorder(20, 10, 6, 10));
+        panel.add(label);
+
+        if (noModsFound) {
+            JButton addButton = new JButton("添加模组目录…");
+            addButton.setAlignmentX(Component.CENTER_ALIGNMENT);
+            addButton.setFont(new Font("SansSerif", Font.PLAIN, 12));
+            addButton.setBackground(new Color(55, 55, 55));
+            addButton.setForeground(new Color(200, 200, 200));
+            addButton.setFocusPainted(false);
+            addButton.setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(new Color(70, 70, 70), 1),
+                    new EmptyBorder(4, 12, 4, 12)));
+            addButton.setCursor(new Cursor(Cursor.HAND_CURSOR));
+            addButton.addActionListener(e -> ModDirectoryAction.chooseAndAdd(project, this));
+            panel.add(addButton);
+
+            List<String> manualDirectories = ModPathSettings.getWorkshopDirectories();
+            if (!manualDirectories.isEmpty()) {
+                StringBuilder text = new StringBuilder("<html><body style='width:300px'>已手动指定 ")
+                        .append(manualDirectories.size()).append(" 个目录：<br>");
+                for (String directory : manualDirectories) {
+                    text.append(escapeHtml(directory)).append("<br>");
+                }
+                text.append("</body></html>");
+
+                JLabel manualLabel = new JLabel(text.toString());
+                manualLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
+                manualLabel.setForeground(new Color(150, 150, 150));
+                manualLabel.setBorder(new EmptyBorder(8, 10, 4, 10));
+                panel.add(manualLabel);
+            }
+        }
+
+        return panel;
+    }
+
+    private String escapeHtml(String text) {
+        return text.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;");
+    }
+
     private void updateStatus(int shown) {
         if (cachedMods == null || cachedMods.isEmpty()) {
             statusLabel.setText("未找到模组");
@@ -329,6 +379,10 @@ public class ModManagerPanel extends JPanel {
         StringBuilder text = new StringBuilder("找到 ").append(shown).append(" 个模组");
         if (shown != cachedMods.size()) {
             text.append(" / 共 ").append(cachedMods.size());
+        }
+        int manualCount = ModPathSettings.getWorkshopDirectories().size();
+        if (manualCount > 0) {
+            text.append("（手动目录 ").append(manualCount).append(" 个）");
         }
         if (!statusSuffix.isEmpty()) {
             text.append(" (").append(statusSuffix).append(')');

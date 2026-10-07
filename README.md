@@ -4,8 +4,8 @@
 
 ## 功能特性
 
-- 自动检测 Steam Workshop 目录（支持 Windows / macOS / Linux）
-- Windows 下读取注册表中的 Steam 安装位置并解析 `libraryfolders.vdf`，支持多 Steam 库路径
+- 自动检测 Steam Workshop 目录（Windows 读注册表 Steam 安装位置 + 解析 `libraryfolders.vdf`，支持多 Steam 库；macOS / Linux 用常见路径）
+- 识别不到时可手动添加模组目录：工具栏「模组目录」按钮（设置图标，可添加多个目录、逐个移除、一键恢复自动识别），或列表空白处的「添加模组目录…」按钮；选择后记住
 - 读取 `descriptor.mod` 文件提取模组信息（名称、版本、支持版本）
 - 颜色编码显示模组信息
   - 文件夹名：白色

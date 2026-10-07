@@ -55,6 +55,11 @@ public class ModScanner {
     }
 
     public static List<String> findWorkshopDirectories() {
+        List<String> manualDirectories = findManualWorkshopDirectories();
+        if (!manualDirectories.isEmpty()) {
+            return manualDirectories;
+        }
+
         List<String> steamRoots = new ArrayList<>();
         String os = System.getProperty("os.name").toLowerCase();
 
@@ -81,6 +86,61 @@ public class ModScanner {
         }
 
         return validWorkshopPaths;
+    }
+
+    private static List<String> findManualWorkshopDirectories() {
+        List<String> directories = new ArrayList<>();
+        for (String configured : ModPathSettings.getWorkshopDirectories()) {
+            Path resolved = resolveWorkshopDirectory(configured);
+            if (resolved == null || containsPath(directories, resolved)) {
+                continue;
+            }
+            directories.add(resolved.toString());
+        }
+        if (!directories.isEmpty()) {
+            LOG.info("Using manually configured workshop directories: " + directories);
+        }
+        return directories;
+    }
+
+    public static Path resolveWorkshopDirectory(String pickedPath) {
+        if (pickedPath == null || pickedPath.isBlank()) {
+            return null;
+        }
+        Path picked = Paths.get(pickedPath);
+        if (!Files.isDirectory(picked)) {
+            LOG.warn("Configured workshop directory is not a directory: " + picked);
+            return null;
+        }
+
+        if (Files.isRegularFile(picked.resolve("descriptor.mod"))) {
+            return picked.getParent();
+        }
+        if (containsModFolder(picked)) {
+            return picked;
+        }
+
+        for (String relative : new String[]{
+                WORKSHOP_RELATIVE_PATH,
+                "workshop/content/" + WORKSHOP_APP_ID,
+                "content/" + WORKSHOP_APP_ID}) {
+            Path candidate = picked.resolve(relative);
+            if (Files.isDirectory(candidate)) {
+                return candidate;
+            }
+        }
+
+        LOG.warn("No mod folders found in the configured directory: " + picked);
+        return null;
+    }
+
+    private static boolean containsModFolder(Path directory) {
+        try (Stream<Path> entries = Files.list(directory)) {
+            return entries.anyMatch(entry -> Files.isDirectory(entry)
+                    && Files.isRegularFile(entry.resolve("descriptor.mod")));
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     private static List<String> findWindowsSteamRoots() {
